@@ -2,28 +2,28 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Quantum Flux</title>
+  <title>Duality Dash</title>
   <style>
-    /* Reset and base styling */
+    /* Reset and basic styling */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: #111;
+      background: #000;
       overflow: hidden;
       font-family: sans-serif;
       user-select: none;
     }
     canvas {
       display: block;
-      background: radial-gradient(ellipse at center, #222, #111);
+      background: linear-gradient(180deg, #111 49%, #222 51%);
     }
     #scoreBoard {
       position: absolute;
       top: 10px;
       left: 10px;
-      padding: 8px 12px;
-      font-size: 20px;
       color: #fff;
-      background: rgba(0, 0, 0, 0.5);
+      font-size: 22px;
+      padding: 6px 10px;
+      background: rgba(0, 0, 0, 0.6);
       border-radius: 4px;
     }
     #overlay {
@@ -62,16 +62,21 @@
 
   <script>
     /*************************************************************
-     * Quantum Flux
+     * Duality Dash
      *
      * Concept:
-     *   - You control a quantum particle drifting through a neon world.
-     *   - Use ↑/↓ arrow keys to move vertically.
-     *   - Press Space to flip your phase (blue ↔ red).
-     *   - Incoming obstacles and coins have a phase too.
-     *       • If phases match, you safely pass (or collect coins).
-     *       • If not, collision means game over.
-     *   - Enjoy smooth particle effects, glowing animations, and an ever‐increasing challenge!
+     *   - The screen is split horizontally into two halves.
+     *   - Upper player: a glowing circle positioned near the bottom of the top half.
+     *   - Lower player: a glowing circle positioned near the top of the bottom half.
+     *   - Obstacles: 
+     *       • In the top half, rectangular obstacles fall down from the top.
+     *       • In the bottom half, obstacles rise up from the bottom.
+     *   - Both players move left/right simultaneously via arrow keys.
+     *   - The game ends if either player collides with an obstacle.
+     *   - Survive as long as possible; the score increases over time.
+     *
+     * Enjoy the smooth animations, glowing effects, and uniquely
+     * challenging dual-screen gameplay!
      *************************************************************/
 
     // Canvas setup
@@ -87,105 +92,72 @@
     canvas.width = width;
     canvas.height = height;
 
-    // Game constants and variables
-    const PHASE_COLORS = ["#00aaff", "#ff3366"];  // Phase 0: blue, Phase 1: red
-    let gameSpeed = 3;         // Base speed for obstacles and coins
-    let obstacleInterval = 1500; // ms between spawns
-    let coinInterval = 2500;     // ms between coin spawns
-    let lastObstacleTime = 0;
-    let lastCoinTime = 0;
-    let score = 0;
-    let gameOver = false;
-    
-    // Player object (quantum particle)
-    const player = {
-      x: width * 0.15,
-      y: height / 2,
-      radius: 15,
-      phase: 0,  // 0 or 1
-      color() { return PHASE_COLORS[this.phase]; },
-      velocityY: 0,
-      speed: 5
-    };
+    // Define the split: top half and bottom half
+    const halfHeight = height / 2;
 
-    // Arrays for obstacles, coins, and particles (for phase-switch effect)
-    const obstacles = []; // Each: { x, y, width, height, phase }
-    const coins = [];     // Each: { x, y, radius, phase }
-    const particles = []; // Each: { x, y, vx, vy, alpha, color }
+    // Player settings
+    const playerRadius = 20;
+    let playerX = width / 2;
+    // Top player positioned near the bottom of top half; bottom player near the top of bottom half.
+    const topPlayerY = halfHeight - 40;
+    const bottomPlayerY = halfHeight + 40;
+    const playerSpeed = 7;
+
+    // Obstacles arrays for each half
+    let topObstacles = [];    // Obstacles falling down
+    let bottomObstacles = []; // Obstacles rising up
+
+    // Game control variables
+    let score = 0;
+    let gameSpeed = 2; // Base obstacle speed; increases over time
+    let lastObstacleTimeTop = 0;
+    let lastObstacleTimeBottom = 0;
+    let obstacleInterval = 1200; // ms between spawns in each half
+    let gameOver = false;
 
     // Input management
     const keys = {};
-    window.addEventListener('keydown', e => {
+    window.addEventListener('keydown', (e) => {
       keys[e.key] = true;
-      // Prevent default for arrow keys and space
-      if (["ArrowUp", "ArrowDown", " "].includes(e.key)) e.preventDefault();
-      // Space toggles phase and spawns particles
-      if (e.key === " ") {
-        player.phase = player.phase === 0 ? 1 : 0;
-        spawnParticles(player.x, player.y, player.color());
+      // Prevent default for arrow keys
+      if (["ArrowLeft", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
       }
     });
-    window.addEventListener('keyup', e => { keys[e.key] = false; });
+    window.addEventListener('keyup', (e) => { keys[e.key] = false; });
 
     // Resize canvas on window resize
     window.addEventListener('resize', () => {
       width = window.innerWidth;
       height = window.innerHeight;
+      halfHeight = height / 2;
       canvas.width = width;
       canvas.height = height;
     });
 
-    // Particle effect for phase switching
-    function spawnParticles(x, y, color) {
-      for (let i = 0; i < 20; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const speed = Math.random() * 3 + 1;
-        particles.push({
-          x, y,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed,
-          alpha: 1,
-          color
-        });
-      }
+    // Obstacle object structure for both halves:
+    // { x, y, width, height, speed } where:
+    // - For topObstacles: start with y = -heightObstacle and move downwards.
+    // - For bottomObstacles: start with y = height + heightObstacle and move upwards.
+    function spawnTopObstacle() {
+      const obsWidth = 50 + Math.random() * 50;
+      const obsHeight = 20 + Math.random() * 20;
+      const x = Math.random() * (width - obsWidth);
+      const y = -obsHeight; // start above the visible area
+      const speed = gameSpeed + Math.random() * 1;
+      topObstacles.push({ x, y, width: obsWidth, height: obsHeight, speed });
+    }
+    function spawnBottomObstacle() {
+      const obsWidth = 50 + Math.random() * 50;
+      const obsHeight = 20 + Math.random() * 20;
+      const x = Math.random() * (width - obsWidth);
+      const y = height; // start below the visible area
+      const speed = gameSpeed + Math.random() * 1;
+      bottomObstacles.push({ x, y, width: obsWidth, height: obsHeight, speed });
     }
 
-    // Update particles
-    function updateParticles(delta) {
-      for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i];
-        p.x += p.vx;
-        p.y += p.vy;
-        p.alpha -= 0.02 * delta/16;
-        if (p.alpha <= 0) particles.splice(i, 1);
-      }
-    }
-
-    // Spawn an obstacle with random vertical position and phase
-    function spawnObstacle() {
-      const heightObstacle = 40;
-      obstacles.push({
-        x: width,
-        y: Math.random() * (height - heightObstacle - 20) + 10,
-        width: 40,
-        height: heightObstacle,
-        phase: Math.floor(Math.random() * 2)
-      });
-    }
-
-    // Spawn a coin with random vertical position and phase
-    function spawnCoin() {
-      coins.push({
-        x: width,
-        y: Math.random() * (height - 20) + 10,
-        radius: 10,
-        phase: Math.floor(Math.random() * 2)
-      });
-    }
-
-    // Collision detection: circle vs. rectangle for obstacles
-    function rectCircleCollide(cx, cy, cr, rx, ry, rw, rh) {
-      // Find the closest point on the rectangle
+    // Collision detection: circle vs. rectangle
+    function circleRectCollision(cx, cy, cr, rx, ry, rw, rh) {
       const closestX = Math.max(rx, Math.min(cx, rx + rw));
       const closestY = Math.max(ry, Math.min(cy, ry + rh));
       const dx = cx - closestX;
@@ -193,184 +165,152 @@
       return (dx * dx + dy * dy) < (cr * cr);
     }
 
-    // Collision detection: circle vs. circle for coins
-    function circleCollide(x1, y1, r1, x2, y2, r2) {
-      const dx = x1 - x2, dy = y1 - y2;
-      return (dx * dx + dy * dy) < ((r1 + r2) * (r1 + r2));
-    }
-
-    // Game loop management
+    // Main game loop
     let lastTime = performance.now();
     function gameLoop(now) {
       if (gameOver) return;
-      const delta = now - lastTime;
+      const deltaTime = now - lastTime;
       lastTime = now;
-      update(delta);
+      update(deltaTime);
       draw();
       requestAnimationFrame(gameLoop);
     }
 
-    // Update game objects
-    function update(delta) {
-      // Player vertical movement using arrow keys
-      if (keys["ArrowUp"]) {
-        player.y -= player.speed;
-      }
-      if (keys["ArrowDown"]) {
-        player.y += player.speed;
-      }
-      // Clamp player within canvas
-      player.y = Math.max(player.radius, Math.min(height - player.radius, player.y));
+    // Update game state
+    function update(deltaTime) {
+      // Increase game speed gradually for escalating difficulty
+      gameSpeed += 0.0005 * deltaTime;
 
-      // Increase difficulty over time
-      gameSpeed += 0.0005 * delta;
-
-      // Spawn obstacles
-      if (performance.now() - lastObstacleTime > obstacleInterval) {
-        spawnObstacle();
-        lastObstacleTime = performance.now();
-      }
-      // Spawn coins
-      if (performance.now() - lastCoinTime > coinInterval) {
-        spawnCoin();
-        lastCoinTime = performance.now();
-      }
-
-      // Update obstacles (move leftward)
-      for (let i = obstacles.length - 1; i >= 0; i--) {
-        const obs = obstacles[i];
-        obs.x -= gameSpeed * delta/16;
-        // Check collision: only dangerous if phases do not match
-        if (rectCircleCollide(player.x, player.y, player.radius, obs.x, obs.y, obs.width, obs.height)) {
-          if (player.phase !== obs.phase) {
-            gameOver = true;
-          }
-        }
-        // Remove off-screen obstacles
-        if (obs.x + obs.width < 0) obstacles.splice(i, 1);
-      }
-
-      // Update coins (move leftward)
-      for (let i = coins.length - 1; i >= 0; i--) {
-        const coin = coins[i];
-        coin.x -= gameSpeed * delta/16;
-        // Check collection: only if phases match
-        if (circleCollide(player.x, player.y, player.radius, coin.x, coin.y, coin.radius)) {
-          if (player.phase === coin.phase) {
-            score += 20;
-            coins.splice(i, 1);
-            continue;
-          }
-        }
-        // Remove off-screen coins
-        if (coin.x + coin.radius < 0) coins.splice(i, 1);
-      }
-
-      // Update particles for phase switch effect
-      updateParticles(delta);
-
-      // Increment score over time
-      score += 0.05 * delta;
+      // Update score (score increases with time survived)
+      score += deltaTime * 0.01;
       scoreBoard.textContent = "Score: " + Math.floor(score);
 
-      // End game if player collides with obstacle (already set gameOver)
+      // Player horizontal movement based on arrow keys
+      if (keys["ArrowLeft"]) {
+        playerX -= playerSpeed;
+      }
+      if (keys["ArrowRight"]) {
+        playerX += playerSpeed;
+      }
+      // Clamp player's x position within canvas
+      playerX = Math.max(playerRadius, Math.min(width - playerRadius, playerX));
+
+      // Spawn new obstacles if enough time has passed
+      if (performance.now() - lastObstacleTimeTop > obstacleInterval) {
+        spawnTopObstacle();
+        lastObstacleTimeTop = performance.now();
+      }
+      if (performance.now() - lastObstacleTimeBottom > obstacleInterval) {
+        spawnBottomObstacle();
+        lastObstacleTimeBottom = performance.now();
+      }
+
+      // Update top obstacles (falling down)
+      for (let i = topObstacles.length - 1; i >= 0; i--) {
+        const obs = topObstacles[i];
+        obs.y += obs.speed * deltaTime / 16;
+        // Check collision with top player
+        if (circleRectCollision(playerX, topPlayerY, playerRadius, obs.x, obs.y, obs.width, obs.height)) {
+          gameOver = true;
+        }
+        // Remove obstacles that have left the bottom of the top half
+        if (obs.y > halfHeight) {
+          topObstacles.splice(i, 1);
+        }
+      }
+
+      // Update bottom obstacles (rising up)
+      for (let i = bottomObstacles.length - 1; i >= 0; i--) {
+        const obs = bottomObstacles[i];
+        obs.y -= obs.speed * deltaTime / 16;
+        // Check collision with bottom player
+        if (circleRectCollision(playerX, bottomPlayerY, playerRadius, obs.x, obs.y, obs.width, obs.height)) {
+          gameOver = true;
+        }
+        // Remove obstacles that have left the top of the bottom half
+        if (obs.y + obs.height < halfHeight) {
+          bottomObstacles.splice(i, 1);
+        }
+      }
+
+      // On game over, show overlay with final score
       if (gameOver) {
         finalScoreText.textContent = "Final Score: " + Math.floor(score);
         overlay.style.display = "block";
       }
     }
 
-    // Draw everything
+    // Draw game objects and backgrounds
     function draw() {
-      // Clear canvas
       ctx.clearRect(0, 0, width, height);
 
-      // Draw background grid effect for added depth
-      ctx.save();
-      ctx.strokeStyle = "rgba(255,255,255,0.05)";
-      for (let i = 0; i < width; i += 40) {
-        ctx.beginPath();
-        ctx.moveTo(i, 0);
-        ctx.lineTo(i, height);
-        ctx.stroke();
-      }
-      for (let j = 0; j < height; j += 40) {
-        ctx.beginPath();
-        ctx.moveTo(0, j);
-        ctx.lineTo(width, j);
-        ctx.stroke();
-      }
-      ctx.restore();
+      // Draw a subtle dividing line between halves
+      ctx.strokeStyle = "#444";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, halfHeight);
+      ctx.lineTo(width, halfHeight);
+      ctx.stroke();
 
-      // Draw obstacles with a subtle pulsing glow
-      obstacles.forEach(obs => {
+      // Draw top obstacles with a neon glow
+      topObstacles.forEach(obs => {
         ctx.save();
-        ctx.fillStyle = PHASE_COLORS[obs.phase];
-        ctx.shadowColor = PHASE_COLORS[obs.phase];
-        ctx.shadowBlur = 20 + 5 * Math.sin(performance.now()/200);
+        ctx.fillStyle = "#ff3366";
+        ctx.shadowColor = "#ff3366";
+        ctx.shadowBlur = 20;
         ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
         ctx.restore();
       });
 
-      // Draw coins with a shimmer
-      coins.forEach(coin => {
+      // Draw bottom obstacles with a neon glow
+      bottomObstacles.forEach(obs => {
         ctx.save();
-        ctx.fillStyle = PHASE_COLORS[coin.phase];
-        ctx.shadowColor = PHASE_COLORS[coin.phase];
-        ctx.shadowBlur = 15;
-        ctx.beginPath();
-        ctx.arc(coin.x, coin.y, coin.radius, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillStyle = "#00aaff";
+        ctx.shadowColor = "#00aaff";
+        ctx.shadowBlur = 20;
+        ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
         ctx.restore();
       });
 
-      // Draw particles for phase-switch effect
-      particles.forEach(p => {
-        ctx.save();
-        ctx.globalAlpha = p.alpha;
-        ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      });
-
-      // Draw player (quantum particle) with a glowing effect
+      // Draw top player (glowing circle)
       ctx.save();
-      ctx.fillStyle = player.color();
-      ctx.shadowColor = player.color();
+      ctx.fillStyle = "#ffff66";
+      ctx.shadowColor = "#ffff66";
       ctx.shadowBlur = 30;
       ctx.beginPath();
-      ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+      ctx.arc(playerX, topPlayerY, playerRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Draw bottom player (glowing circle)
+      ctx.save();
+      ctx.fillStyle = "#66ff66";
+      ctx.shadowColor = "#66ff66";
+      ctx.shadowBlur = 30;
+      ctx.beginPath();
+      ctx.arc(playerX, bottomPlayerY, playerRadius, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
 
-    // Restart the game on button click
-    restartButton.addEventListener('click', () => {
-      resetGame();
-    });
-
-    // Reset game to initial state
+    // Restart game when button is clicked
+    restartButton.addEventListener("click", resetGame);
     function resetGame() {
-      player.x = width * 0.15;
-      player.y = height / 2;
-      player.velocityY = 0;
-      player.phase = 0;
-      obstacles.length = 0;
-      coins.length = 0;
-      particles.length = 0;
+      // Reset players and obstacles
+      playerX = width / 2;
+      topObstacles = [];
+      bottomObstacles = [];
       score = 0;
-      gameSpeed = 3;
+      gameSpeed = 2;
       gameOver = false;
       overlay.style.display = "none";
-      lastObstacleTime = performance.now();
-      lastCoinTime = performance.now();
+      lastObstacleTimeTop = performance.now();
+      lastObstacleTimeBottom = performance.now();
       lastTime = performance.now();
       requestAnimationFrame(gameLoop);
     }
 
-    // Start the game loop
+    // Start the game
     resetGame();
   </script>
 </body>
