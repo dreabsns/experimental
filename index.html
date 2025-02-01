@@ -2,28 +2,36 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Radial Lane Runner – Orbit Shift</title>
+  <title>Neon Hyper Jump</title>
   <style>
-    /* Basic reset and background styling */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: #111;
-      color: #eee;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #000;
       overflow: hidden;
+      font-family: sans-serif;
       user-select: none;
     }
-    canvas {
-      display: block;
-      background: radial-gradient(ellipse at center, #222 0%, #111 80%);
+    canvas { 
+      display: block; 
+      background: linear-gradient(135deg, #111, #222);
+    }
+    #scoreBoard {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font-size: 24px;
+      padding: 5px 10px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 4px;
     }
     #overlay {
       position: absolute;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
+      color: #fff;
       text-align: center;
-      font-size: 24px;
       padding: 20px;
       background: rgba(0,0,0,0.8);
       border: 2px solid #444;
@@ -37,17 +45,8 @@
       border: none;
       border-radius: 4px;
       background: #28a745;
-      color: white;
+      color: #fff;
       cursor: pointer;
-    }
-    #scoreBoard {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      font-size: 20px;
-      padding: 5px 10px;
-      background: rgba(0,0,0,0.5);
-      border-radius: 4px;
     }
   </style>
 </head>
@@ -55,24 +54,24 @@
   <canvas id="gameCanvas"></canvas>
   <div id="scoreBoard">Score: 0</div>
   <div id="overlay">
-    <div id="gameOverText">Game Over!</div>
-    <div id="finalScore"></div>
+    <div id="gameOverText" style="font-size:32px; margin-bottom:10px;">Game Over!</div>
+    <div id="finalScore" style="font-size:24px;"></div>
     <button id="restartButton">Restart</button>
   </div>
-  
+
   <script>
     /*************************************************************
-     * Radial Lane Runner – Orbit Shift
+     * Neon Hyper Jump
      *
      * Controls:
-     *   ← / → : Rotate your orb along the current ring.
-     *   ↑ / ↓ : Change lanes (move radially outward/inward).
+     *   ← / → : Move left/right.
+     *   Space : Flip your ball’s color.
      *
-     * Avoid the red obstacles and collect golden coins.
-     * The game speeds up over time. Enjoy!
+     * Bounce on neon platforms! Only land safely if your ball’s
+     * color matches the platform. Climb higher, rack up score,
+     * and watch the neon world accelerate!
      *************************************************************/
-    
-    // Get the canvas and context
+
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const scoreBoard = document.getElementById('scoreBoard');
@@ -80,253 +79,223 @@
     const finalScoreText = document.getElementById('finalScore');
     const restartButton = document.getElementById('restartButton');
 
-    // Set the canvas size to fill the window
-    function resizeCanvas() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      center.x = canvas.width / 2;
-      center.y = canvas.height / 2;
-    }
-    window.addEventListener('resize', resizeCanvas);
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
 
-    // Game settings and variables
-    const center = { x: canvas.width/2, y: canvas.height/2 };
-    const laneRadii = [80, 120, 160, 200, 240]; // 5 lanes (0 innermost to 4 outermost)
-    const NUM_LANES = laneRadii.length;
-    let gameSpeed = 50;   // Speed at which obstacles/coins move (pixels per second)
-    let speedIncrease = 0.005; // Gradual increase in speed per frame
-    let spawnInterval = 1500;  // How often to spawn new objects (ms)
-    let lastSpawnTime = 0;
-    let score = 0;
-    let gameOver = false;
-
-    // The player object
+    // Colors used in the game (neon blue and neon magenta)
+    const COLORS = ['#0ff', '#ff0ff0'];
+    
+    // Player settings
     const player = {
-      lane: 2,         // Starting in the middle lane
-      angle: 0,        // In radians (0 means to the right)
-      radius: laneRadii[2], // Current radial distance (updates with lane)
-      size: 12,        // Radius of the player circle
-      rotationSpeed: 0.06  // How fast the player rotates (radians per frame)
+      x: width / 2,
+      y: height - 100,
+      radius: 15,
+      color: COLORS[0],
+      velocityY: 0,
+      velocityX: 0,
+      speed: 5,
+      jumpStrength: -15,
+      gravity: 0.6
     };
 
-    // Lists for obstacles and coins.
-    // Each object has: { r: radial distance, angle, type: 'obstacle' or 'coin', size }
-    const objects = [];
+    // Platform settings and list
+    const platforms = [];
+    const platformWidth = 120;
+    const platformHeight = 15;
+    const platformGap = 100; // vertical distance between platforms
+    const numPlatforms = Math.ceil(height / platformGap) + 2;
 
-    // Time management
-    let lastTime = performance.now();
+    // Create initial platforms
+    function initPlatforms() {
+      platforms.length = 0;
+      for (let i = 0; i < numPlatforms; i++) {
+        let plat = {
+          x: Math.random() * (width - platformWidth - 20) + 10,
+          y: height - i * platformGap,
+          width: platformWidth,
+          height: platformHeight,
+          color: COLORS[Math.floor(Math.random() * COLORS.length)]
+        };
+        platforms.push(plat);
+      }
+    }
 
     // Input management
     const keys = {};
     window.addEventListener('keydown', e => {
       keys[e.key] = true;
-      // Prevent arrow keys from scrolling the page
-      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key))
+      // Prevent default for arrow keys and space
+      if (['ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
         e.preventDefault();
+      }
     });
     window.addEventListener('keyup', e => {
       keys[e.key] = false;
     });
 
-    // Restart the game
-    restartButton.addEventListener('click', () => {
-      resetGame();
+    // Resize canvas on window resize
+    window.addEventListener('resize', () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+      // Reinitialize platforms to fill the new screen
+      initPlatforms();
     });
 
-    // Reset game variables to start a new game
+    // Game variables
+    let score = 0;
+    let highestY = player.y; // track highest point reached
+    let gameOver = false;
+
+    // Reset game function
     function resetGame() {
+      player.x = width / 2;
+      player.y = height - 100;
+      player.velocityY = 0;
+      player.velocityX = 0;
+      player.color = COLORS[0];
       score = 0;
-      gameSpeed = 50;
-      objects.length = 0;
-      player.lane = 2;
-      player.angle = 0;
-      player.radius = laneRadii[player.lane];
+      highestY = player.y;
       gameOver = false;
+      initPlatforms();
       overlay.style.display = 'none';
-      lastSpawnTime = performance.now();
       lastTime = performance.now();
       requestAnimationFrame(gameLoop);
     }
 
-    // Utility: Convert polar coordinates (r, angle) to canvas (x, y)
-    function polarToCartesian(r, angle) {
-      return {
-        x: center.x + r * Math.cos(angle),
-        y: center.y + r * Math.sin(angle)
-      };
-    }
-
-    // Collision detection between two circles
-    function circlesCollide(x1, y1, r1, x2, y2, r2) {
-      const dx = x1 - x2, dy = y1 - y2;
-      return Math.hypot(dx, dy) < (r1 + r2);
-    }
-
-    // Spawn a new obstacle or coin at the outer edge
-    function spawnObject() {
-      // Random angle between 0 and 2π
-      const angle = Math.random() * Math.PI * 2;
-      // Spawn just outside the outer lane
-      const r = laneRadii[NUM_LANES - 1] + 40;
-      // Randomly decide: 70% obstacle, 30% coin
-      const type = (Math.random() < 0.3) ? 'coin' : 'obstacle';
-      const size = (type === 'coin') ? 8 : 14;
-      objects.push({ r, angle, type, size });
-    }
-
-    // Draw the concentric lanes
-    function drawLanes() {
-      ctx.save();
-      ctx.strokeStyle = '#444';
-      ctx.lineWidth = 2;
-      for (let i = 0; i < NUM_LANES; i++) {
-        ctx.beginPath();
-        ctx.arc(center.x, center.y, laneRadii[i], 0, Math.PI * 2);
-        ctx.stroke();
+    // Event listener for color flip (space bar)
+    window.addEventListener('keydown', e => {
+      if (e.key === ' ') {
+        // Flip color instantly
+        player.color = (player.color === COLORS[0]) ? COLORS[1] : COLORS[0];
       }
-      ctx.restore();
-    }
+    });
 
-    // Draw the player (a neon orb)
-    function drawPlayer() {
-      const pos = polarToCartesian(player.radius, player.angle);
-      ctx.save();
-      // Glow effect
-      ctx.shadowColor = '#0ff';
-      ctx.shadowBlur = 20;
-      ctx.fillStyle = '#0ff';
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, player.size, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
+    // Restart button event
+    restartButton.addEventListener('click', resetGame);
 
-    // Draw game objects (obstacles and coins)
-    function drawObjects() {
-      objects.forEach(obj => {
-        const pos = polarToCartesian(obj.r, obj.angle);
-        ctx.save();
-        if (obj.type === 'obstacle') {
-          ctx.fillStyle = '#f33';
-          // Pulse effect
-          const pulse = Math.sin(performance.now() / 200 + obj.r) * 2;
-          ctx.beginPath();
-          ctx.arc(pos.x, pos.y, obj.size + pulse, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (obj.type === 'coin') {
-          // Draw coin with a slight sparkle
-          ctx.fillStyle = '#ffc107';
-          ctx.beginPath();
-          ctx.arc(pos.x, pos.y, obj.size, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        }
-        ctx.restore();
-      });
+    // Main game loop variables
+    let lastTime = performance.now();
+    function gameLoop(time) {
+      if (gameOver) return;
+      const deltaTime = time - lastTime;
+      lastTime = time;
+      update(deltaTime);
+      draw();
+      requestAnimationFrame(gameLoop);
     }
 
     // Update game state
     function update(deltaTime) {
-      // Increase game speed gradually
-      gameSpeed += speedIncrease * deltaTime;
-
-      // Handle player rotation (left/right arrows)
+      // Horizontal movement
       if (keys['ArrowLeft']) {
-        player.angle -= player.rotationSpeed * deltaTime;
+        player.velocityX = -player.speed;
+      } else if (keys['ArrowRight']) {
+        player.velocityX = player.speed;
+      } else {
+        player.velocityX = 0;
       }
-      if (keys['ArrowRight']) {
-        player.angle += player.rotationSpeed * deltaTime;
-      }
-      // Handle lane changes (up/down arrows)
-      if (keys['ArrowUp'] && player.lane < NUM_LANES - 1) {
-        player.lane++;
-        player.radius = laneRadii[player.lane];
-        keys['ArrowUp'] = false;  // avoid repeated switching
-      }
-      if (keys['ArrowDown'] && player.lane > 0) {
-        player.lane--;
-        player.radius = laneRadii[player.lane];
-        keys['ArrowDown'] = false;
-      }
+      player.x += player.velocityX;
+      // Boundaries
+      if (player.x - player.radius < 0) player.x = player.radius;
+      if (player.x + player.radius > width) player.x = width - player.radius;
       
-      // Update objects: move them inward (decrease radial distance)
-      for (let i = objects.length - 1; i >= 0; i--) {
-        const obj = objects[i];
-        obj.r -= gameSpeed * deltaTime / 1000;
-        // If object has reached inside the innermost lane, remove it.
-        if (obj.r < laneRadii[0] - 50) {
-          objects.splice(i, 1);
-        }
-      }
+      // Apply gravity
+      player.velocityY += player.gravity;
+      player.y += player.velocityY;
       
-      // Spawn new objects at intervals
-      const now = performance.now();
-      if (now - lastSpawnTime > spawnInterval) {
-        spawnObject();
-        lastSpawnTime = now;
-        // Occasionally spawn two objects at once
-        if (Math.random() < 0.3) {
-          spawnObject();
-        }
-      }
-      
-      // Check collisions
-      const playerPos = polarToCartesian(player.radius, player.angle);
-      for (let i = objects.length - 1; i >= 0; i--) {
-        const obj = objects[i];
-        const objPos = polarToCartesian(obj.r, obj.angle);
-        if (circlesCollide(playerPos.x, playerPos.y, player.size, objPos.x, objPos.y, obj.size)) {
-          if (obj.type === 'obstacle') {
-            // Collision with an obstacle: game over!
-            gameOver = true;
-          } else if (obj.type === 'coin') {
-            // Collect coin: increase score and remove coin
-            score += 10;
-            objects.splice(i, 1);
+      // Check collision with platforms
+      platforms.forEach(plat => {
+        // Only check if player is falling
+        if (player.velocityY > 0) {
+          // Simple AABB collision (circle vs. rect approximation)
+          if (player.x + player.radius > plat.x &&
+              player.x - player.radius < plat.x + plat.width &&
+              player.y + player.radius > plat.y &&
+              player.y + player.radius < plat.y + plat.height + 10) {
+            // Only bounce if colors match
+            if (player.color === plat.color) {
+              player.velocityY = player.jumpStrength;
+            } else {
+              // Mismatched color = game over!
+              gameOver = true;
+            }
           }
         }
+      });
+
+      // Update highestY (remember: y decreases as you go up)
+      if (player.y < highestY) {
+        highestY = player.y;
+        score = Math.floor((height - highestY) / 10);
       }
+
+      // If player falls below the bottom, game over
+      if (player.y - player.radius > height) {
+        gameOver = true;
+      }
+
+      // Scroll platforms downward when player goes above a threshold
+      const scrollThreshold = height * 0.4;
+      if (player.y < scrollThreshold) {
+        let scrollAmount = scrollThreshold - player.y;
+        player.y = scrollThreshold;
+        platforms.forEach(plat => {
+          plat.y += scrollAmount;
+        });
+      }
+
+      // Recycle platforms: if a platform goes off the bottom, move it to the top
+      platforms.forEach(plat => {
+        if (plat.y - plat.height > height) {
+          plat.y = plat.y - height - platformGap;
+          plat.x = Math.random() * (width - platformWidth - 20) + 10;
+          // Randomize platform color anew
+          plat.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+        }
+      });
+
+      // Update score board
+      scoreBoard.textContent = 'Score: ' + score;
       
-      // Increase score gradually based on survival time
-      score += deltaTime * 0.01;
-    }
-
-    // Draw the score on screen
-    function updateScore() {
-      scoreBoard.textContent = 'Score: ' + Math.floor(score);
-    }
-
-    // Main game loop
-    function gameLoop(now) {
-      if (!gameOver) {
-        const deltaTime = now - lastTime;
-        lastTime = now;
-        
-        // Update game state
-        update(deltaTime);
-        
-        // Clear canvas
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw background elements
-        drawLanes();
-        drawObjects();
-        drawPlayer();
-        updateScore();
-        
-        requestAnimationFrame(gameLoop);
-      } else {
-        // Show game over overlay
-        finalScoreText.textContent = 'Final Score: ' + Math.floor(score);
+      // End game overlay
+      if (gameOver) {
+        finalScoreText.textContent = 'Final Score: ' + score;
         overlay.style.display = 'block';
       }
     }
 
+    // Draw everything
+    function draw() {
+      // Clear canvas
+      ctx.clearRect(0, 0, width, height);
+
+      // Draw platforms
+      platforms.forEach(plat => {
+        ctx.fillStyle = plat.color;
+        // Add a neon glow effect
+        ctx.shadowColor = plat.color;
+        ctx.shadowBlur = 20;
+        ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
+      });
+      ctx.shadowBlur = 0;
+
+      // Draw player (neon ball)
+      ctx.fillStyle = player.color;
+      ctx.shadowColor = player.color;
+      ctx.shadowBlur = 30;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
     // Start the game
-    resizeCanvas();
-    resetGame();
+    initPlatforms();
+    requestAnimationFrame(gameLoop);
   </script>
 </body>
 </html>
