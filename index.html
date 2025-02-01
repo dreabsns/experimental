@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Radial Lane Runner – Orbit Shift</title>
+  <style>
+    /* Basic reset and background styling */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #111;
+      color: #eee;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      background: radial-gradient(ellipse at center, #222 0%, #111 80%);
+    }
+    #overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      font-size: 24px;
+      padding: 20px;
+      background: rgba(0,0,0,0.8);
+      border: 2px solid #444;
+      border-radius: 8px;
+      display: none;
+    }
+    #overlay button {
+      margin-top: 15px;
+      padding: 10px 20px;
+      font-size: 18px;
+      border: none;
+      border-radius: 4px;
+      background: #28a745;
+      color: white;
+      cursor: pointer;
+    }
+    #scoreBoard {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 20px;
+      padding: 5px 10px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div id="scoreBoard">Score: 0</div>
+  <div id="overlay">
+    <div id="gameOverText">Game Over!</div>
+    <div id="finalScore"></div>
+    <button id="restartButton">Restart</button>
+  </div>
+  
+  <script>
+    /*************************************************************
+     * Radial Lane Runner – Orbit Shift
+     *
+     * Controls:
+     *   ← / → : Rotate your orb along the current ring.
+     *   ↑ / ↓ : Change lanes (move radially outward/inward).
+     *
+     * Avoid the red obstacles and collect golden coins.
+     * The game speeds up over time. Enjoy!
+     *************************************************************/
+    
+    // Get the canvas and context
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreBoard = document.getElementById('scoreBoard');
+    const overlay = document.getElementById('overlay');
+    const finalScoreText = document.getElementById('finalScore');
+    const restartButton = document.getElementById('restartButton');
+
+    // Set the canvas size to fill the window
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      center.x = canvas.width / 2;
+      center.y = canvas.height / 2;
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    // Game settings and variables
+    const center = { x: canvas.width/2, y: canvas.height/2 };
+    const laneRadii = [80, 120, 160, 200, 240]; // 5 lanes (0 innermost to 4 outermost)
+    const NUM_LANES = laneRadii.length;
+    let gameSpeed = 50;   // Speed at which obstacles/coins move (pixels per second)
+    let speedIncrease = 0.005; // Gradual increase in speed per frame
+    let spawnInterval = 1500;  // How often to spawn new objects (ms)
+    let lastSpawnTime = 0;
+    let score = 0;
+    let gameOver = false;
+
+    // The player object
+    const player = {
+      lane: 2,         // Starting in the middle lane
+      angle: 0,        // In radians (0 means to the right)
+      radius: laneRadii[2], // Current radial distance (updates with lane)
+      size: 12,        // Radius of the player circle
+      rotationSpeed: 0.06  // How fast the player rotates (radians per frame)
+    };
+
+    // Lists for obstacles and coins.
+    // Each object has: { r: radial distance, angle, type: 'obstacle' or 'coin', size }
+    const objects = [];
+
+    // Time management
+    let lastTime = performance.now();
+
+    // Input management
+    const keys = {};
+    window.addEventListener('keydown', e => {
+      keys[e.key] = true;
+      // Prevent arrow keys from scrolling the page
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key))
+        e.preventDefault();
+    });
+    window.addEventListener('keyup', e => {
+      keys[e.key] = false;
+    });
+
+    // Restart the game
+    restartButton.addEventListener('click', () => {
+      resetGame();
+    });
+
+    // Reset game variables to start a new game
+    function resetGame() {
+      score = 0;
+      gameSpeed = 50;
+      objects.length = 0;
+      player.lane = 2;
+      player.angle = 0;
+      player.radius = laneRadii[player.lane];
+      gameOver = false;
+      overlay.style.display = 'none';
+      lastSpawnTime = performance.now();
+      lastTime = performance.now();
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Utility: Convert polar coordinates (r, angle) to canvas (x, y)
+    function polarToCartesian(r, angle) {
+      return {
+        x: center.x + r * Math.cos(angle),
+        y: center.y + r * Math.sin(angle)
+      };
+    }
+
+    // Collision detection between two circles
+    function circlesCollide(x1, y1, r1, x2, y2, r2) {
+      const dx = x1 - x2, dy = y1 - y2;
+      return Math.hypot(dx, dy) < (r1 + r2);
+    }
+
+    // Spawn a new obstacle or coin at the outer edge
+    function spawnObject() {
+      // Random angle between 0 and 2π
+      const angle = Math.random() * Math.PI * 2;
+      // Spawn just outside the outer lane
+      const r = laneRadii[NUM_LANES - 1] + 40;
+      // Randomly decide: 70% obstacle, 30% coin
+      const type = (Math.random() < 0.3) ? 'coin' : 'obstacle';
+      const size = (type === 'coin') ? 8 : 14;
+      objects.push({ r, angle, type, size });
+    }
+
+    // Draw the concentric lanes
+    function drawLanes() {
+      ctx.save();
+      ctx.strokeStyle = '#444';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < NUM_LANES; i++) {
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, laneRadii[i], 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Draw the player (a neon orb)
+    function drawPlayer() {
+      const pos = polarToCartesian(player.radius, player.angle);
+      ctx.save();
+      // Glow effect
+      ctx.shadowColor = '#0ff';
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = '#0ff';
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, player.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Draw game objects (obstacles and coins)
+    function drawObjects() {
+      objects.forEach(obj => {
+        const pos = polarToCartesian(obj.r, obj.angle);
+        ctx.save();
+        if (obj.type === 'obstacle') {
+          ctx.fillStyle = '#f33';
+          // Pulse effect
+          const pulse = Math.sin(performance.now() / 200 + obj.r) * 2;
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, obj.size + pulse, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (obj.type === 'coin') {
+          // Draw coin with a slight sparkle
+          ctx.fillStyle = '#ffc107';
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, obj.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+        ctx.restore();
+      });
+    }
+
+    // Update game state
+    function update(deltaTime) {
+      // Increase game speed gradually
+      gameSpeed += speedIncrease * deltaTime;
+
+      // Handle player rotation (left/right arrows)
+      if (keys['ArrowLeft']) {
+        player.angle -= player.rotationSpeed * deltaTime;
+      }
+      if (keys['ArrowRight']) {
+        player.angle += player.rotationSpeed * deltaTime;
+      }
+      // Handle lane changes (up/down arrows)
+      if (keys['ArrowUp'] && player.lane < NUM_LANES - 1) {
+        player.lane++;
+        player.radius = laneRadii[player.lane];
+        keys['ArrowUp'] = false;  // avoid repeated switching
+      }
+      if (keys['ArrowDown'] && player.lane > 0) {
+        player.lane--;
+        player.radius = laneRadii[player.lane];
+        keys['ArrowDown'] = false;
+      }
+      
+      // Update objects: move them inward (decrease radial distance)
+      for (let i = objects.length - 1; i >= 0; i--) {
+        const obj = objects[i];
+        obj.r -= gameSpeed * deltaTime / 1000;
+        // If object has reached inside the innermost lane, remove it.
+        if (obj.r < laneRadii[0] - 50) {
+          objects.splice(i, 1);
+        }
+      }
+      
+      // Spawn new objects at intervals
+      const now = performance.now();
+      if (now - lastSpawnTime > spawnInterval) {
+        spawnObject();
+        lastSpawnTime = now;
+        // Occasionally spawn two objects at once
+        if (Math.random() < 0.3) {
+          spawnObject();
+        }
+      }
+      
+      // Check collisions
+      const playerPos = polarToCartesian(player.radius, player.angle);
+      for (let i = objects.length - 1; i >= 0; i--) {
+        const obj = objects[i];
+        const objPos = polarToCartesian(obj.r, obj.angle);
+        if (circlesCollide(playerPos.x, playerPos.y, player.size, objPos.x, objPos.y, obj.size)) {
+          if (obj.type === 'obstacle') {
+            // Collision with an obstacle: game over!
+            gameOver = true;
+          } else if (obj.type === 'coin') {
+            // Collect coin: increase score and remove coin
+            score += 10;
+            objects.splice(i, 1);
+          }
+        }
+      }
+      
+      // Increase score gradually based on survival time
+      score += deltaTime * 0.01;
+    }
+
+    // Draw the score on screen
+    function updateScore() {
+      scoreBoard.textContent = 'Score: ' + Math.floor(score);
+    }
+
+    // Main game loop
+    function gameLoop(now) {
+      if (!gameOver) {
+        const deltaTime = now - lastTime;
+        lastTime = now;
+        
+        // Update game state
+        update(deltaTime);
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw background elements
+        drawLanes();
+        drawObjects();
+        drawPlayer();
+        updateScore();
+        
+        requestAnimationFrame(gameLoop);
+      } else {
+        // Show game over overlay
+        finalScoreText.textContent = 'Final Score: ' + Math.floor(score);
+        overlay.style.display = 'block';
+      }
+    }
+
+    // Start the game
+    resizeCanvas();
+    resetGame();
+  </script>
+</body>
+</html>
